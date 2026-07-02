@@ -1,8 +1,8 @@
 import { Response } from 'express';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
-import { prisma } from '../db';
-import { AuthRequest } from '../middleware/auth';
+import { prisma } from '@/config/db';
+import { AuthRequest } from '@/middleware/auth';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'premium_qr_ordering_system_secret_key_2026';
 

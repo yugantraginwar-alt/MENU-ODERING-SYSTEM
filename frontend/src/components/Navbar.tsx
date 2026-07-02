@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Sun, Moon, Menu as MenuIcon, X, QrCode } from 'lucide-react';
-import { useTheme } from '../app/context/ThemeContext';
+import { useTheme } from '@/store/ThemeContext';
 
 export default function Navbar() {
   const pathname = usePathname();

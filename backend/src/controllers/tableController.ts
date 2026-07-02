@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import * as QRCode from 'qrcode';
-import { prisma } from '../db';
-import { AuthRequest } from '../middleware/auth';
+import { prisma } from '@/config/db';
+import { AuthRequest } from '@/middleware/auth';
 
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 

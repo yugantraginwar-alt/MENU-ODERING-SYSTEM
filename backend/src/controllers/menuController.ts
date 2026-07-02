@@ -1,6 +1,6 @@
 import { Response } from 'express';
-import { prisma } from '../db';
-import { AuthRequest } from '../middleware/auth';
+import { prisma } from '@/config/db';
+import { AuthRequest } from '@/middleware/auth';
 
 // --- Categories ---
 export const getCategories = async (req: AuthRequest, res: Response) => {

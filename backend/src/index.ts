@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Import controllers
-import { login, getProfile } from './controllers/authController';
+import { login, getProfile } from '@/controllers/authController';
 import {
   getCategories,
   createCategory,
@@ -18,24 +18,24 @@ import {
   createMenuItem,
   updateMenuItem,
   deleteMenuItem,
-} from './controllers/menuController';
+} from '@/controllers/menuController';
 import {
   getTables,
   getTableDetails,
   createTable,
   deleteTable,
-} from './controllers/tableController';
+} from '@/controllers/tableController';
 import {
   getOrders,
   getActiveOrders,
   getOrderDetails,
   createOrder,
   updateOrderStatus,
-} from './controllers/orderController';
-import { getAnalytics } from './controllers/analyticsController';
+} from '@/controllers/orderController';
+import { getAnalytics } from '@/controllers/analyticsController';
 
 // Import middlewares
-import { authenticateJWT, requireRole } from './middleware/auth';
+import { authenticateJWT, requireRole } from '@/middleware/auth';
 
 const app = express();
 const httpServer = createServer(app);

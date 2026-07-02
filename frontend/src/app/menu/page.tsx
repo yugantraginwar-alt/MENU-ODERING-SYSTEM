@@ -15,7 +15,7 @@ import {
   Flame,
   Check
 } from 'lucide-react';
-import Navbar from '../../components/Navbar';
+import Navbar from '@/components/Navbar';
 
 interface MenuItem {
   id: string;

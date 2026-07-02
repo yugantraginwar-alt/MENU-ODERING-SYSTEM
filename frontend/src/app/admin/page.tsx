@@ -27,7 +27,7 @@ import {
   Percent,
   Activity
 } from 'lucide-react';
-import Navbar from '../../components/Navbar';
+import Navbar from '@/components/Navbar';
 
 interface Category {
   id: string;

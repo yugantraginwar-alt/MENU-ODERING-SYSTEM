@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, Outfit } from "next/font/google";
-import "./globals.css";
-import { ThemeProvider } from "./context/ThemeContext";
-import { SocketProvider } from "./context/SocketContext";
+import "@/styles/globals.css";
+import { ThemeProvider } from "@/store/ThemeContext";
+import { SocketProvider } from "@/store/SocketContext";
 
 const inter = Inter({
   variable: "--font-body",

@@ -20,8 +20,8 @@ import {
   ChefHat,
   BellRing
 } from 'lucide-react';
-import { useSocket } from '../context/SocketContext';
-import Navbar from '../../components/Navbar';
+import { useSocket } from '@/store/SocketContext';
+import Navbar from '@/components/Navbar';
 
 interface OrderItem {
   id: string;
