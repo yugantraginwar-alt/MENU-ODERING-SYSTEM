@@ -1,0 +1,95 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      String   @default("STAFF") // ADMIN, STAFF, KITCHEN
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Restaurant {
+  id            String   @id @default(uuid())
+  name          String
+  logoUrl       String?
+  address       String?
+  phone         String?
+  taxRate       Float    @default(0.0) // percentage
+  serviceCharge Float    @default(0.0) // percentage
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  tables        Table[]
+  categories    Category[]
+  orders        Order[]
+}
+
+model Table {
+  id           String      @id @default(uuid())
+  number       String
+  qrCodeUrl    String?     // stores dataUrl or file path
+  status       String      @default("AVAILABLE") // AVAILABLE, OCCUPIED
+  restaurantId String
+  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  orders       Order[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model Category {
+  id           String      @id @default(uuid())
+  name         String
+  description  String?
+  restaurantId String
+  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  menuItems    MenuItem[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model MenuItem {
+  id          String      @id @default(uuid())
+  name        String
+  description String
+  price       Float
+  imageUrl    String?
+  isVeg       Boolean     @default(false)
+  isAvailable Boolean     @default(true)
+  categoryId  String
+  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  orderItems  OrderItem[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model Order {
+  id           String      @id @default(uuid())
+  status       String      @default("PLACED") // PLACED, ACCEPTED, PREPARING, READY, SERVED, CANCELLED
+  totalAmount  Float
+  tableId      String
+  table        Table       @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  restaurantId String
+  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  items        OrderItem[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model OrderItem {
+  id                 String   @id @default(uuid())
+  quantity           Int
+  specialInstructions String?
+  price              Float    // captures the price at the time of purchase
+  menuItemId         String
+  menuItem           MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  orderId            String
+  order              Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
