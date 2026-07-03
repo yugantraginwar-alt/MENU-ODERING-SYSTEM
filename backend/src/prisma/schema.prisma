@@ -8,37 +8,82 @@ generator client {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  name      String
-  role      String   @default("STAFF") // ADMIN, STAFF, KITCHEN
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String      @id @default(uuid())
+  email        String      @unique
+  password     String
+  name         String
+  role         String      @default("WAITER") // OWNER, MANAGER, CASHIER, WAITER, KITCHEN
+  restaurantId String?
+  restaurant   Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  branchId     String?
+  branch       Branch?     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  waiterOrders Order[]     @relation("WaiterOrders")
+  kitchenOrders Order[]    @relation("KitchenOrders")
+  auditLogs    AuditLog[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 }
 
 model Restaurant {
-  id            String   @id @default(uuid())
+  id            String      @id @default(uuid())
   name          String
   logoUrl       String?
   address       String?
   phone         String?
-  taxRate       Float    @default(0.0) // percentage
-  serviceCharge Float    @default(0.0) // percentage
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  taxRate       Float       @default(8.5)
+  serviceCharge Float       @default(10.0)
+  currency      String      @default("USD")
+  gstNumber     String      @default("27AAAAA1111A1Z1")
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  branches      Branch[]
+  users         User[]
   tables        Table[]
   categories    Category[]
   orders        Order[]
+  auditLogs     AuditLog[]
+}
+
+model Branch {
+  id           String      @id @default(uuid())
+  name         String
+  address      String?
+  phone        String?
+  restaurantId String
+  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  floors       Floor[]
+  tables       Table[]
+  categories   Category[]
+  menuItems    MenuItem[]
+  users        User[]
+  orders       Order[]
+  auditLogs    AuditLog[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model Floor {
+  id        String   @id @default(uuid())
+  name      String
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  tables    Table[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Table {
   id           String      @id @default(uuid())
   number       String
   qrCodeUrl    String?     // stores dataUrl or file path
-  status       String      @default("AVAILABLE") // AVAILABLE, OCCUPIED
+  status       String      @default("AVAILABLE") // AVAILABLE, OCCUPIED, RESERVED, NEEDS_ASSISTANCE, INACTIVE, CLEANING_NEEDED
+  guestsCount  Int         @default(2)
   restaurantId String
   restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  branchId     String
+  branch       Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  floorId      String?
+  floor        Floor?      @relation(fields: [floorId], references: [id], onDelete: SetNull)
   orders       Order[]
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
@@ -50,46 +95,73 @@ model Category {
   description  String?
   restaurantId String
   restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  branchId     String?
+  branch       Branch?     @relation(fields: [branchId], references: [id], onDelete: Cascade)
   menuItems    MenuItem[]
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 }
 
 model MenuItem {
-  id          String      @id @default(uuid())
-  name        String
-  description String
-  price       Float
-  imageUrl    String?
-  isVeg       Boolean     @default(false)
-  isAvailable Boolean     @default(true)
-  categoryId  String
-  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  orderItems  OrderItem[]
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-}
-
-model Order {
   id           String      @id @default(uuid())
-  status       String      @default("PLACED") // PLACED, ACCEPTED, PREPARING, READY, SERVED, CANCELLED
-  totalAmount  Float
-  tableId      String
-  table        Table       @relation(fields: [tableId], references: [id], onDelete: Cascade)
-  restaurantId String
-  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  items        OrderItem[]
+  name         String
+  description  String
+  price        Float
+  imageUrl     String?
+  isVeg        Boolean     @default(false)
+  isAvailable  Boolean     @default(true) // preserved for compatibility
+  status       String      @default("AVAILABLE") // AVAILABLE, OUT_OF_STOCK, HIDDEN
+  categoryId   String
+  category     Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  branchId     String?
+  branch       Branch?     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  orderItems   OrderItem[]
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 }
 
+model Order {
+  id                 String      @id @default(uuid())
+  orderNumber        String      // ORD-XXXX
+  status             String      @default("PLACED") // PLACED, ACCEPTED, PREPARING, READY, SERVED, PAID, CLOSED, CANCELLED
+  paymentStatus      String      @default("UNPAID") // UNPAID, PARTIAL, PAID, REFUNDED, FAILED
+  totalAmount        Float
+  sessionId          String      // anonymous customer session ID
+  tableId            String
+  table              Table       @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  restaurantId       String
+  restaurant         Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  branchId           String
+  branch             Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  items              OrderItem[]
+  assignedWaiterId   String?
+  assignedWaiter     User?       @relation("WaiterOrders", fields: [assignedWaiterId], references: [id], onDelete: SetNull)
+  assignedKitchenId  String?
+  assignedKitchen    User?       @relation("KitchenOrders", fields: [assignedKitchenId], references: [id], onDelete: SetNull)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+}
+
 model OrderItem {
-  id                 String   @id @default(uuid())
-  quantity           Int
+  id                  String   @id @default(uuid())
+  quantity            Int
   specialInstructions String?
-  price              Float    // captures the price at the time of purchase
-  menuItemId         String
-  menuItem           MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
-  orderId            String
-  order              Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  price               Float    // captures the price at the time of purchase
+  menuItemId          String
+  menuItem            MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  orderId             String
+  order               Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id           String      @id @default(uuid())
+  userId       String?
+  user         User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  restaurantId String?
+  restaurant   Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  branchId     String?
+  branch       Branch?     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  action       String      // LOGIN, LOGOUT, MENU_CHANGE, PRICE_CHANGE, REFUND, TABLE_TRANSFER, BILL_PRINT
+  details      String      // JSON string
+  timestamp    DateTime    @default(now())
 }

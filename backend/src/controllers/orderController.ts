@@ -1,20 +1,135 @@
 import { Response } from 'express';
-import { prisma } from '@/config/db';
 import { AuthRequest } from '@/middleware/auth';
+import { OrderRepository } from '@/repositories/orderRepository';
+import { OrderService } from '@/services/orderService';
+import { TableRepository } from '@/repositories/tableRepository';
+import { validateOrderCreate } from '@/validators';
+import { logAudit } from '@/utils/auditLogger';
+import { prisma } from '@/config/db';
+
+export const enrichOrder = async (order: any) => {
+  if (!order) return order;
+  try {
+    // 1. Fetch active orders in same branch that are PLACED, ACCEPTED, or PREPARING
+    const activeOrders = await prisma.order.findMany({
+      where: {
+        branchId: order.branchId,
+        status: { in: ['PLACED', 'ACCEPTED', 'PREPARING'] }
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    const index = activeOrders.findIndex(o => o.id === order.id);
+    const queuePosition = index !== -1 ? index + 1 : 0;
+    const queueLength = activeOrders.length;
+
+    // 2. Chef Assigned
+    let chefAssigned = 'Chef Marco 👨🍳';
+    if (order.assignedKitchen?.name) {
+      chefAssigned = `${order.assignedKitchen.name} 👨🍳`;
+    } else {
+      const CHEFS = ['Chef Marco', 'Chef Sophia', 'Chef Antonio', 'Chef Isabella', 'Chef Elena'];
+      let sum = 0;
+      for (let i = 0; i < order.id.length; i++) {
+        sum += order.id.charCodeAt(i);
+      }
+      chefAssigned = `${CHEFS[sum % CHEFS.length]} 👨🍳`;
+    }
+
+    // 3. Progress percentage and remaining times
+    let progressPercent = 15;
+    let baseRemaining = 15;
+
+    switch (order.status) {
+      case 'PLACED':
+        progressPercent = 15;
+        baseRemaining = 15;
+        break;
+      case 'ACCEPTED':
+        progressPercent = 35;
+        baseRemaining = 12;
+        break;
+      case 'PREPARING':
+        progressPercent = 68;
+        baseRemaining = 8;
+        break;
+      case 'READY':
+        progressPercent = 90;
+        baseRemaining = 0;
+        break;
+      case 'SERVED':
+      case 'PAID':
+      case 'CLOSED':
+        progressPercent = 100;
+        baseRemaining = 0;
+        break;
+      case 'CANCELLED':
+        progressPercent = 0;
+        baseRemaining = 0;
+        break;
+    }
+
+    const itemsCount = order.items?.reduce((acc: number, it: any) => acc + it.quantity, 0) || 0;
+
+    // Remaining time matches status and adds queue buffer and item buffer
+    let estimatedTimeRemaining = baseRemaining;
+    if (order.status !== 'READY' && order.status !== 'SERVED' && order.status !== 'PAID' && order.status !== 'CLOSED' && order.status !== 'CANCELLED') {
+      estimatedTimeRemaining += Math.max(0, queuePosition - 1) * 3 + Math.max(0, itemsCount - 2) * 1;
+    }
+
+    const estimatedPrepTime = Math.max(10, 10 + itemsCount * 2 + Math.max(0, queuePosition - 1) * 2);
+    const estimatedServingTime = estimatedPrepTime + 3;
+
+    return {
+      ...order,
+      queuePosition,
+      queueLength,
+      chefAssigned,
+      estimatedPrepTime,
+      estimatedServingTime,
+      estimatedTimeRemaining,
+      progressPercent
+    };
+  } catch (err) {
+    console.error('Error enriching order:', err);
+    return order;
+  }
+};
+
+export const broadcastQueueUpdates = async (io: any, branchId: string) => {
+  if (!io) return;
+  try {
+    const activeOrders = await prisma.order.findMany({
+      where: {
+        branchId,
+        status: { in: ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'] }
+      },
+      include: {
+        table: true,
+        restaurant: true,
+        branch: true,
+        assignedKitchen: true,
+        assignedWaiter: true,
+        items: { include: { menuItem: true } }
+      }
+    });
+
+    for (const order of activeOrders) {
+      const enriched = await enrichOrder(order);
+      io.to(`order_${order.id}`).emit('order_updated', enriched);
+    }
+  } catch (err) {
+    console.error('Failed to broadcast queue updates:', err);
+  }
+};
 
 export const getOrders = async (req: AuthRequest, res: Response) => {
   try {
-    const orders = await prisma.order.findMany({
-      include: {
-        table: true,
-        items: {
-          include: {
-            menuItem: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const { branchId } = req.query;
+    const filters: any = {};
+    if (branchId) filters.branchId = String(branchId);
+
+    const orders = await OrderRepository.findAll(filters);
     res.json(orders);
   } catch (error) {
     console.error('Get orders error:', error);
@@ -24,22 +139,11 @@ export const getOrders = async (req: AuthRequest, res: Response) => {
 
 export const getActiveOrders = async (req: AuthRequest, res: Response) => {
   try {
-    const orders = await prisma.order.findMany({
-      where: {
-        status: {
-          in: ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'],
-        },
-      },
-      include: {
-        table: true,
-        items: {
-          include: {
-            menuItem: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const { branchId } = req.query;
+    const filters: any = {};
+    if (branchId) filters.branchId = String(branchId);
+
+    const orders = await OrderRepository.findActive(filters);
     res.json(orders);
   } catch (error) {
     console.error('Get active orders error:', error);
@@ -51,23 +155,12 @@ export const getOrderDetails = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
 
   try {
-    const order = await prisma.order.findUnique({
-      where: { id },
-      include: {
-        table: true,
-        items: {
-          include: {
-            menuItem: true,
-          },
-        },
-      },
-    });
-
+    const order = await OrderRepository.findById(id);
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
     }
-
-    res.json(order);
+    const enriched = await enrichOrder(order);
+    res.json(enriched);
   } catch (error) {
     console.error('Get order details error:', error);
     res.status(500).json({ error: 'Server error retrieving order details' });
@@ -75,99 +168,38 @@ export const getOrderDetails = async (req: AuthRequest, res: Response) => {
 };
 
 export const createOrder = async (req: AuthRequest, res: Response) => {
-  const { tableId, items } = req.body;
-
   try {
-    if (!tableId || !items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'Table ID and order items are required' });
-    }
+    validateOrderCreate(req.body);
+    const { tableId, sessionId, items } = req.body;
 
-    // 1. Fetch table and restaurant
-    const table = await prisma.table.findUnique({
-      where: { id: tableId },
-      include: { restaurant: true },
+    const finalSessionId = sessionId || `sess-${Math.random().toString(36).slice(2, 11)}`;
+
+    const order = await OrderService.createOrder({
+      tableId,
+      sessionId: finalSessionId,
+      items,
     });
 
-    if (!table) {
-      return res.status(404).json({ error: 'Table not found' });
-    }
-
-    const restaurant = table.restaurant;
-
-    // 2. Fetch menu items to calculate prices
-    const menuItemIds = items.map((item: any) => item.menuItemId);
-    const dbMenuItems = await prisma.menuItem.findMany({
-      where: { id: { in: menuItemIds } },
-    });
-
-    let subtotal = 0;
-    const orderItemsData = [];
-
-    for (const item of items) {
-      const dbItem = dbMenuItems.find((m) => m.id === item.menuItemId);
-      if (!dbItem) {
-        return res.status(400).json({ error: `Menu item with ID ${item.menuItemId} not found` });
-      }
-      if (!dbItem.isAvailable) {
-        return res.status(400).json({ error: `Menu item '${dbItem.name}' is currently unavailable` });
-      }
-
-      const price = dbItem.price;
-      const quantity = parseInt(item.quantity) || 1;
-      subtotal += price * quantity;
-
-      orderItemsData.push({
-        quantity,
-        specialInstructions: item.specialInstructions || '',
-        price,
-        menuItemId: dbItem.id,
-      });
-    }
-
-    // Compute total with tax and service charge
-    const taxAmount = subtotal * (restaurant.taxRate / 100);
-    const serviceAmount = subtotal * (restaurant.serviceCharge / 100);
-    const totalAmount = subtotal + taxAmount + serviceAmount;
-
-    // 3. Create order
-    const order = await prisma.order.create({
-      data: {
-        status: 'PLACED',
-        totalAmount,
-        tableId: table.id,
-        restaurantId: restaurant.id,
-        items: {
-          create: orderItemsData,
-        },
-      },
-      include: {
-        table: true,
-        items: {
-          include: {
-            menuItem: true,
-          },
-        },
-      },
-    });
-
-    // 4. Mark table as OCCUPIED
-    await prisma.table.update({
-      where: { id: table.id },
-      data: { status: 'OCCUPIED' },
-    });
-
-    // 5. Broadcast to Socket.io
+    // Broadcast via socket
     const io = req.app.get('io');
     if (io) {
-      // Emit to general room for staff and kitchen feeds
-      io.emit('new_order', order);
-      io.emit('order_status_changed', order);
+      const fullOrder = await OrderRepository.findById(order.id);
+      const enriched = await enrichOrder(fullOrder || order);
+      io.emit('new_order', enriched);
+      io.to(`order_${order.id}`).emit('order_updated', enriched);
+
+      // Broadcast queue updates to other tracking clients since a new order has joined the queue
+      await broadcastQueueUpdates(io, order.branchId);
+
+      // Fetch table and emit table update
+      const table = await TableRepository.findById(tableId);
+      if (table) io.emit('table_updated', table);
     }
 
     res.status(201).json(order);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Create order error:', error);
-    res.status(500).json({ error: 'Server error placing order' });
+    res.status(400).json({ error: error.message || 'Server error placing order' });
   }
 };
 
@@ -175,66 +207,104 @@ export const updateOrderStatus = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  const validStatuses = ['PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'SERVED', 'CANCELLED'];
-
   try {
-    if (!status || !validStatuses.includes(status)) {
-      return res.status(400).json({ error: 'Invalid or missing status' });
-    }
+    const assignedKitchenId = req.user?.role === 'KITCHEN' ? req.user.id : undefined;
+    const assignedWaiterId = req.user?.role === 'WAITER' ? req.user.id : undefined;
 
-    const order = await prisma.order.findUnique({
-      where: { id },
-      include: { table: true },
-    });
+    const updated = await OrderService.updateStatus(id, status, assignedKitchenId, assignedWaiterId);
 
-    if (!order) {
-      return res.status(404).json({ error: 'Order not found' });
-    }
-
-    const updated = await prisma.order.update({
-      where: { id },
-      data: { status },
-      include: {
-        table: true,
-        items: {
-          include: {
-            menuItem: true,
-          },
-        },
-      },
-    });
-
-    // If order is served or cancelled, reset table back to AVAILABLE
-    if (status === 'SERVED' || status === 'CANCELLED') {
-      // Check if there are other active orders for this table first
-      const activeOrdersCount = await prisma.order.count({
-        where: {
-          tableId: order.tableId,
-          status: { in: ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'] },
-          id: { not: id },
-        },
-      });
-
-      if (activeOrdersCount === 0) {
-        await prisma.table.update({
-          where: { id: order.tableId },
-          data: { status: 'AVAILABLE' },
-        });
-      }
-    }
-
-    // Broadcast update via Socket.io
     const io = req.app.get('io');
     if (io) {
-      // Send to the table specific room
-      io.to(`order_${id}`).emit('order_updated', updated);
-      // Send to dashboards
-      io.emit('order_status_changed', updated);
+      const fullOrder = await OrderRepository.findById(id);
+      const enriched = await enrichOrder(fullOrder || updated);
+      io.to(`order_${id}`).emit('order_updated', enriched);
+      io.emit('order_status_changed', enriched);
+
+      // Broadcast queue position updates for other orders in the same branch
+      await broadcastQueueUpdates(io, updated.branchId);
+
+      // Emit table updates to staff board
+      const table = await TableRepository.findById(updated.tableId);
+      if (table) io.emit('table_updated', table);
     }
 
+    // Log status transitions in audit log
+    await logAudit({
+      userId: req.user?.id,
+      restaurantId: updated.restaurantId,
+      branchId: updated.branchId,
+      action: 'STAFF_ACTION',
+      details: { message: `Updated Order status to ${status}`, orderId: id, orderNumber: updated.orderNumber },
+    });
+
     res.json(updated);
-  } catch (error) {
-    console.error('Update order status error:', error);
-    res.status(500).json({ error: 'Server error updating order status' });
+  } catch (error: any) {
+    console.error('Update status error:', error);
+    res.status(400).json({ error: error.message || 'Server error updating status' });
+  }
+};
+
+export const updatePaymentStatus = async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const { paymentStatus } = req.body;
+
+  try {
+    const updated = await OrderService.updatePaymentStatus(id, paymentStatus);
+
+    const io = req.app.get('io');
+    if (io) {
+      const fullOrder = await OrderRepository.findById(id);
+      const enriched = await enrichOrder(fullOrder || updated);
+      io.to(`order_${id}`).emit('order_updated', enriched);
+      io.emit('payment_completed', enriched);
+
+      // Broadcast queue position updates as an order is paid and removed from the active kitchen queue
+      await broadcastQueueUpdates(io, updated.branchId);
+      
+      const table = await TableRepository.findById(updated.tableId);
+      if (table) io.emit('table_updated', table);
+    }
+
+    await logAudit({
+      userId: req.user?.id,
+      restaurantId: updated.restaurantId,
+      branchId: updated.branchId,
+      action: 'REFUND', // or PAYMENT_SETTLEMENT
+      details: { message: `Settled payment status: ${paymentStatus}`, orderId: id, total: updated.totalAmount },
+    });
+
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Update payment error:', error);
+    res.status(400).json({ error: error.message || 'Server error settling bill' });
+  }
+};
+
+export const transferOrders = async (req: AuthRequest, res: Response) => {
+  const { fromTableId, toTableId } = req.body;
+
+  try {
+    const result = await OrderService.transferOrders(fromTableId, toTableId);
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('orders_transferred', { fromTableId, toTableId });
+      
+      const source = await TableRepository.findById(fromTableId);
+      const target = await TableRepository.findById(toTableId);
+      if (source) io.emit('table_updated', source);
+      if (target) io.emit('table_updated', target);
+    }
+
+    await logAudit({
+      userId: req.user?.id,
+      action: 'TABLE_TRANSFER',
+      details: { message: 'Transferred orders', fromTableId, toTableId },
+    });
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('Transfer orders error:', error);
+    res.status(400).json({ error: error.message || 'Server error transferring orders' });
   }
 };

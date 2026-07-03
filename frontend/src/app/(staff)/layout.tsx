@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, Outfit } from "next/font/google";
 import "@/styles/globals.css";
-import { ThemeProvider } from "@/store/ThemeContext";
 import { SocketProvider } from "@/store/SocketContext";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 const inter = Inter({
   variable: "--font-body",
@@ -17,11 +17,11 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "L'Ardoise QR | Smart QR Ordering SaaS",
-  description: "Experience premium contactless dining. Scan, browse, order instantly, and follow your order in real time.",
+  title: "L'Ardoise POS | Management Terminals Hub",
+  description: "Unified POS and restaurant management console.",
 };
 
-export default function RootLayout({
+export default function StaffRootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
@@ -31,14 +31,13 @@ export default function RootLayout({
       lang="en"
       className={`${inter.variable} ${outfit.variable} h-full antialiased dark`}
     >
-      <body className="min-h-full flex flex-col bg-bg-primary text-fg-primary transition-colors duration-200">
-        <ThemeProvider>
-          <SocketProvider>
+      <body className="min-h-full flex flex-col bg-neutral-950 text-neutral-200 antialiased font-sans">
+        <SocketProvider>
+          <ErrorBoundary>
             {children}
-          </SocketProvider>
-        </ThemeProvider>
+          </ErrorBoundary>
+        </SocketProvider>
       </body>
     </html>
   );
 }
-

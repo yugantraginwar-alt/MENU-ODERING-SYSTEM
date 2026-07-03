@@ -4,8 +4,52 @@ import { AuthRequest } from '@/middleware/auth';
 
 // --- Categories ---
 export const getCategories = async (req: AuthRequest, res: Response) => {
+  const { restaurantId, branchId, tableId, sessionId } = req.query as {
+    restaurantId?: string;
+    branchId?: string;
+    tableId?: string;
+    sessionId?: string;
+  };
+
   try {
+    // 1. Validate restaurantId if provided
+    if (restaurantId && restaurantId !== 'demo') {
+      const rest = await prisma.restaurant.findUnique({ where: { id: restaurantId } });
+      if (!rest) {
+        return res.status(400).json({ error: 'Invalid Request: Restaurant not found' });
+      }
+    }
+
+    // 2. Validate branchId if provided
+    if (branchId && branchId !== 'demo') {
+      const branch = await prisma.branch.findUnique({ where: { id: branchId } });
+      if (!branch) {
+        return res.status(400).json({ error: 'Invalid Request: Branch not found' });
+      }
+    }
+
+    // 3. Validate tableId if provided
+    if (tableId && tableId !== 'demo') {
+      const table = await prisma.table.findUnique({ where: { id: tableId } });
+      if (!table) {
+        return res.status(404).json({ error: 'Table Not Found' });
+      }
+    }
+
+    // 4. Validate sessionId if provided
+    if (sessionId) {
+      if (sessionId.trim() === '') {
+        return res.status(410).json({ error: 'Session Expired' });
+      }
+    }
+
+    const whereClause: any = {};
+    if (restaurantId && restaurantId !== 'demo') {
+      whereClause.restaurantId = restaurantId;
+    }
+
     const categories = await prisma.category.findMany({
+      where: whereClause,
       include: {
         menuItems: true,
       },

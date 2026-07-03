@@ -24,6 +24,9 @@ import {
   getTableDetails,
   createTable,
   deleteTable,
+  validateQR,
+  updateTableStatus,
+  updateTableGuests,
 } from '@/controllers/tableController';
 import {
   getOrders,
@@ -31,11 +34,15 @@ import {
   getOrderDetails,
   createOrder,
   updateOrderStatus,
+  updatePaymentStatus,
+  transferOrders,
 } from '@/controllers/orderController';
 import { getAnalytics } from '@/controllers/analyticsController';
 
 // Import middlewares
 import { authenticateJWT, requireRole } from '@/middleware/auth';
+import { rateLimiter } from '@/middleware/rateLimiter';
+import { errorHandler } from '@/middleware/errorHandler';
 
 const app = express();
 const httpServer = createServer(app);
@@ -55,7 +62,8 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
-app.set('io', io); // Make socket io accessible in controllers
+app.use(rateLimiter);
+app.set('io', io);
 
 // --- Routes Definition ---
 
@@ -70,31 +78,39 @@ app.get('/api/auth/profile', authenticateJWT, getProfile);
 
 // Categories
 app.get('/api/categories', getCategories);
-app.post('/api/categories', authenticateJWT, requireRole(['ADMIN']), createCategory);
-app.put('/api/categories/:id', authenticateJWT, requireRole(['ADMIN']), updateCategory);
-app.delete('/api/categories/:id', authenticateJWT, requireRole(['ADMIN']), deleteCategory);
+app.post('/api/categories', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER']), createCategory);
+app.put('/api/categories/:id', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER']), updateCategory);
+app.delete('/api/categories/:id', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER']), deleteCategory);
 
 // Menu Items
 app.get('/api/menu-items', getMenuItems);
-app.post('/api/menu-items', authenticateJWT, requireRole(['ADMIN']), createMenuItem);
-app.put('/api/menu-items/:id', authenticateJWT, requireRole(['ADMIN']), updateMenuItem);
-app.delete('/api/menu-items/:id', authenticateJWT, requireRole(['ADMIN']), deleteMenuItem);
+app.post('/api/menu-items', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER']), createMenuItem);
+app.put('/api/menu-items/:id', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER']), updateMenuItem);
+app.delete('/api/menu-items/:id', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER']), deleteMenuItem);
 
 // Tables
+app.get('/api/tables/validate-qr', validateQR);
 app.get('/api/tables', getTables);
 app.get('/api/tables/:id', getTableDetails);
-app.post('/api/tables', authenticateJWT, requireRole(['ADMIN']), createTable);
-app.delete('/api/tables/:id', authenticateJWT, requireRole(['ADMIN']), deleteTable);
+app.post('/api/tables', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER']), createTable);
+app.delete('/api/tables/:id', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER']), deleteTable);
+app.put('/api/tables/:id/status', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER', 'WAITER', 'CASHIER']), updateTableStatus);
+app.put('/api/tables/:id/guests', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER', 'WAITER']), updateTableGuests);
 
 // Orders
-app.get('/api/orders', authenticateJWT, requireRole(['ADMIN', 'STAFF', 'KITCHEN']), getOrders);
-app.get('/api/orders/active', authenticateJWT, requireRole(['ADMIN', 'STAFF', 'KITCHEN']), getActiveOrders);
+app.get('/api/orders', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER', 'WAITER', 'CASHIER', 'KITCHEN']), getOrders);
+app.get('/api/orders/active', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER', 'WAITER', 'CASHIER', 'KITCHEN']), getActiveOrders);
 app.get('/api/orders/:id', getOrderDetails);
 app.post('/api/orders', createOrder);
-app.put('/api/orders/:id/status', authenticateJWT, requireRole(['ADMIN', 'STAFF', 'KITCHEN']), updateOrderStatus);
+app.post('/api/orders/transfer', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER', 'WAITER', 'CASHIER']), transferOrders);
+app.put('/api/orders/:id/status', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER', 'WAITER', 'CASHIER', 'KITCHEN']), updateOrderStatus);
+app.put('/api/orders/:id/payment', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER', 'CASHIER']), updatePaymentStatus);
 
 // Analytics
-app.get('/api/analytics', authenticateJWT, requireRole(['ADMIN']), getAnalytics);
+app.get('/api/analytics', authenticateJWT, requireRole(['ADMIN', 'OWNER', 'MANAGER']), getAnalytics);
+
+// Global Error Handler
+app.use(errorHandler);
 
 // --- Socket.io Coordination ---
 io.on('connection', (socket) => {
@@ -104,6 +120,18 @@ io.on('connection', (socket) => {
   socket.on('join_order', (orderId) => {
     socket.join(`order_${orderId}`);
     console.log(`Socket ${socket.id} joined tracking room: order_${orderId}`);
+  });
+
+  // Forward customer requests to staff terminal room/clients
+  socket.on('customer_request', (data) => {
+    console.log(`Forwarding customer_request for table ${data.tableNumber}: ${data.type}`);
+    io.emit('customer_request', data);
+  });
+
+  // Forward kitchen ready status notifications to waiter terminals
+  socket.on('kitchen_ready', (data) => {
+    console.log(`Forwarding kitchen_ready for table ${data.tableNumber}`);
+    io.emit('kitchen_ready', data);
   });
 
   // Client requests manual disconnect

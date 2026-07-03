@@ -19,7 +19,11 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const socketInstance = io(BACKEND_URL, {
       transports: ['websocket'],
-      reconnectionAttempts: 5,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
     });
 
     socketInstance.on('connect', () => {

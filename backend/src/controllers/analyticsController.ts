@@ -4,6 +4,12 @@ import { AuthRequest } from '@/middleware/auth';
 
 export const getAnalytics = async (req: AuthRequest, res: Response) => {
   try {
+    const { branchId } = req.query;
+    const whereClause: any = {
+      status: { in: ['SERVED', 'PAID', 'CLOSED'] },
+    };
+    if (branchId) whereClause.branchId = String(branchId);
+
     const orders = await prisma.order.findMany({
       include: {
         items: {
@@ -12,9 +18,7 @@ export const getAnalytics = async (req: AuthRequest, res: Response) => {
           },
         },
       },
-      where: {
-        status: 'SERVED', // Only count completed/paid orders for revenue analytics
-      },
+      where: whereClause,
     });
 
     // 1. Total revenue & count
